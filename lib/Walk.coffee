@@ -99,10 +99,9 @@ class Walk extends EventEmitter
       ignore : -> false
       maxDepth : opts?.depth or -1
       parentRes : res
-    .then => 
+    .then =>
       @_walking false
       res.__root__ or res
-    console.log 123
 
   each : ( f ) =>
     log.v 'each'
@@ -138,7 +137,7 @@ class Walk extends EventEmitter
     @walk context : items, depth : opts?.depth, ( x ) ->
       @context.push x if f.call @, x
       undefined
-    items
+    .then -> items
 
   ###
   Public: Finds the first node that satisfies the callback
@@ -161,7 +160,7 @@ class Walk extends EventEmitter
         @context.item = x
         @abort()
       undefined
-    o.context.item
+    .then -> o.context.item
 
   ###
   Public: Performs a `reduce` operation on the AST tree
@@ -184,7 +183,7 @@ class Walk extends EventEmitter
     @walk o, ( x ) ->
       @context.acc = f.call @, x, @context.acc
       undefined
-    o.context.acc
+    .then -> o.context.acc
 
   _abort : ( err ) =>
     log.v 'aborted:', err
@@ -202,7 +201,6 @@ class Walk extends EventEmitter
   _walk : ( opts ) =>
     new Promise ( resolve, reject ) =>
       setImmediate =>
-        console.log opts.id
         return resolve() if !opts?.node or @_aborted
 
         node = opts.node

@@ -2,7 +2,8 @@ should = require 'should'
 assert = require 'assert'
 Walk = require '../lib/Walk'
 log = require('taglog') 'walk.test'
-log.level 'verbose'
+Q  = require 'q'
+#log.level 'verbose'
 
 pkg = require '../package.json'
 
@@ -15,7 +16,7 @@ describe 'Walk', ->
     w = new Walk obj
     p = new Walk pkg
 
-  it 'should visit all nodes', (done) ->
+  it 'should visit all nodes', ( done ) ->
     count = 0
     items = []
     w.walk ( x ) ->
@@ -26,38 +27,58 @@ describe 'Walk', ->
       count.should.equal 8
       items.should.eql [ 1, 2, 7, 8, 9 ]
       done()
+    .fail done
 
-  it 'find all', ->
-    items = w.findAll -> @isLeaf
-    items.should.eql [ 1, 2, 7, 8, 9 ]
+  it 'find all', ( done ) ->
+    w.findAll -> @isLeaf
+    .then ( items ) ->
+      items.should.eql [ 1, 2, 7, 8, 9 ]
+      done()
+    .fail done
 
-  it 'reduce (count leaves)', ->
-    res = w.reduce initial : 0, ( x, acc ) ->
+  it 'reduce (count leaves)', ( done ) ->
+    w.reduce initial : 0, ( x, acc ) ->
       if @isLeaf then acc + 1 else acc
-    res.should.equal 5
+    .then ( res ) ->
+      res.should.equal 5
+      done()
+    .fail done
 
-  it 'count non leaves', ->
-    res = w.count -> !@isLeaf
-    res.should.equal 3
+  it 'count non leaves', ( done ) ->
+    w.count -> !@isLeaf
+    .then ( res ) ->
+      res.should.equal 3
+      done()
+    .fail done
 
-  it 'count - leaf + non leaf nodes = total nodes', ->
-    leaves = w.count -> @isLeaf
-    nonLeaves = w.count -> !@isLeaf
-    total = w.count -> true
-    assert.equal total, leaves + nonLeaves
+  it 'count - leaf + non leaf nodes = total nodes', ( done ) ->
+    Q.spread [
+      (new Walk(obj).count -> @isLeaf),
+      (new Walk(obj).count -> !@isLeaf),
+      (new Walk(obj).count -> true) ]
+    , ( leaves, nonLeaves, total ) ->
+      assert.equal total, leaves + nonLeaves
+      done()
+    .fail done
 
-  it 'findAll - all string in package.json', ->
-    items = p.findAll (x) -> typeof x is 'string'
-    #console.log items
+  it 'findAll - all string in package.json', ( done ) ->
+    p.findAll ( x ) -> typeof x is 'string'
+    .then ( items ) ->
+      assert.equal items[0], 'walk-it'
+      #console.log items
+      done()
+    .fail done
 
-  it 'findFirst - with id', ->
-    name = p.findFirst (x) ->
-      @id is 'name'
-    assert.equal name, 'walk-it'
+  it 'findFirst - with id', ( done ) ->
+    p.findFirst -> @id is 'name'
+    .then ( name ) ->
+      assert.equal name, 'walk-it'
+      done()
+    .fail done
 
-  it 'should abort immediately', ->
+  #it 'should abort immediately', ( done ) ->
 
-  describe 'events', ->
+  describe 'events', -> 
   
 
 
