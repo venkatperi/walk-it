@@ -1,5 +1,5 @@
 _ = require 'lodash'
-{prop} = require './util'
+{prop, leaf} = require './util'
 
 class NodeVisitor
   prop @, 'path', get : -> @opts.path
@@ -8,7 +8,7 @@ class NodeVisitor
   prop @, 'id', get : -> @opts.path[ -1.. ][ 0 ]
   prop @, 'parent', get : -> @opts.parent
   prop @, 'context', get : -> @opts.context
-  prop @, 'isLeaf', get : -> !_.isObjectLike @opts.node
+  prop @, 'isLeaf', get : -> leaf @opts.node
 
   constructor : ( @opts ) ->
 

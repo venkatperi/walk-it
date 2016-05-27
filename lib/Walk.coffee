@@ -1,6 +1,8 @@
 _ = require 'lodash'
 NodeVisitor = require './NodeVisitor'
 {EventEmitter} = require 'events'
+{leaf, Promise} = require './util'
+log = require('taglog') 'Walk'
 
 cloneOpts = ( opts, n, child, id, r ) ->
   x = _.assign {}, opts,
@@ -80,12 +82,9 @@ class Walk extends EventEmitter
     This can be viewed as a mapping operation on the AST tree (see example at
      the end).
     ###
-  walk : ( context, depth, visitor ) =>
+  walk : ( opts, visitor ) =>
     throw new Error 'already walking' if @_isWalking
-    if !depth and !visitor
-      visitor = context
-    else if !visitor
-      [visitor, depth] = [ depth, context ]
+    [visitor, opts] = [ opts ] if arguments.length is 1
     throw new Error 'Missing argument: visitor' unless visitor?
 
     @_walking true
@@ -96,28 +95,31 @@ class Walk extends EventEmitter
       node : @node,
       path : []
       visitor : visitor,
-      context : context,
-      ignore : ( x ) -> false
-      maxDepth : depth or -1
+      context : opts?.context,
+      ignore : -> false
+      maxDepth : opts?.depth or -1
       parentRes : res
-    @_walking false
-    res.__root__ or res
+    .then => 
+      @_walking false
+      res.__root__ or res
+    console.log 123
 
   each : ( f ) =>
-    @walk ( x ) ->
-      f x
-      undefined
+    log.v 'each'
+    throw new Error 'Missing argument: f' unless f?
+    @walk ( x ) -> f(x); undefined
 
   map : ( f ) =>
+    log.v 'map'
+    throw new Error 'Missing argument: f' unless f?
     @walk ( x ) -> f x
 
-  count : ( depth, f ) =>
-    [f,depth] = switch arguments.length
-      when 1 then [ depth ]
-      else
-        [ f, depth ]
-
-    @reduce 0, ( x, acc ) -> if f.call @, x then acc + 1 else acc
+  count : ( opts, f ) =>
+    log.v 'count', opts
+    [f, opts] = [ opts ] if arguments.length is 1
+    throw new Error 'Missing argument: f' unless f?
+    @reduce initial : 0, depth : opts?.depth, ( x, acc ) ->
+      if f.call(@, x) then acc + 1 else acc
 
   ###
   Public: Finds all nodes that satisfy the callback
@@ -128,10 +130,12 @@ class Walk extends EventEmitter
   
   Returns array of {Object} ast nodes or undefined.
   ###
-  findAll : ( depth, f ) =>
-    [f, depth] = [ depth, f ] unless f?
+  findAll : ( opts, f ) =>
+    log.v 'findAll', opts
+    [f, opts] = [ opts ] if arguments.length is 1
+    throw new Error 'Missing argument: f' unless f?
     items = []
-    @walk items, depth, ( x ) ->
+    @walk context : items, depth : opts?.depth, ( x ) ->
       @context.push x if f.call @, x
       undefined
     items
@@ -145,15 +149,19 @@ class Walk extends EventEmitter
   
   Returns {Object}, the ast node or undefined.
   ###
-  findFirst : ( depth, f ) =>
-    [f, depth] = [ depth, f ] unless f?
-    item = undefined
-    @walk [], depth, ( x ) ->
-      if  !item and f.call @, x
-        item = x
+  findFirst : ( opts, f ) =>
+    log.v 'findFirst', opts
+    [f, opts] = [ opts ] if arguments.length is 1
+    throw new Error 'Missing argument: f' unless f?
+    res = {}
+    o = _.assign {}, opts
+    o.context = {}
+    @walk o, ( x ) ->
+      if !@context.item and f.call @, x
+        @context.item = x
         @abort()
       undefined
-    item
+    o.context.item
 
   ###
   Public: Performs a `reduce` operation on the AST tree
@@ -166,19 +174,20 @@ class Walk extends EventEmitter
 
   Returns the final accumulator value.
   ###
-  reduce : ( acc, depth, f ) =>
-    [f, acc, depth] = switch arguments.length
-      when 1 then [ acc ]
-      when 2 then [ depth, acc ]
-      else
-        [ f, acc, depth ]
+  reduce : ( opts, f ) =>
+    log.v 'reduce', opts
+    [f, opts] = [ opts ] if arguments.length is 1
+    throw new Error 'Missing argument: f' unless f?
 
-    @walk null, depth, ( x ) ->
-      acc = f.call @, x, acc
+    o = _.assign {}, opts
+    o.context = { acc : opts?.initial }
+    @walk o, ( x ) ->
+      @context.acc = f.call @, x, @context.acc
       undefined
-    acc
+    o.context.acc
 
   _abort : ( err ) =>
+    log.v 'aborted:', err
     @_aborted = true
     @_error = err
     @emit 'abort', err
@@ -186,37 +195,47 @@ class Walk extends EventEmitter
   _walking : ( val ) =>
     return if @_isWalking is val
     @_isWalking = val
-    @emit if val then 'walk' else 'done'
+    status = if val then 'walk' else 'done'
+    log.v 'status:', status
+    @emit status
 
   _walk : ( opts ) =>
-    return unless opts?.node or @_aborted
-    node = opts.node
-    opts.path.push opts.id if opts.id?
-    depth = opts.path.length
+    new Promise ( resolve, reject ) =>
+      setImmediate =>
+        console.log opts.id
+        return resolve() if !opts?.node or @_aborted
 
-    checkDepth =
-      opts.maxDepth < 0 or
-        (opts.maxDepth >= 0 and
-          depth < opts.maxDepth)
+        node = opts.node
+        opts.path.push opts.id if opts.id?
+        depth = opts.path.length
 
-    @emit 'visit', opts
-    nv = opts.nodeVisitor(opts)
-    res = nv.visit()
-    @emit 'visited', opts, res
+        checkDepth =
+          opts.maxDepth < 0 or
+            (opts.maxDepth >= 0 and
+              depth < opts.maxDepth)
 
-    if res and opts.parentRes
-      insert opts.parentRes, res, nv.id
+        @emit 'visiting', opts
+        nv = opts.nodeVisitor(opts)
+        res = nv.visit()
+        @emit 'visited', opts, res
 
-    if _.isObjectLike(node) and checkDepth and !@_aborted
-      opts.block = false
-      for own attr, val of node when !opts.ignore(attr) and !opts.block
-        if Array.isArray val
-          for c,i in val
-            @_walk cloneOpts opts, node, c, "#{attr}[#{i}]", res
+        if res and opts.parentRes
+          insert opts.parentRes, res, nv.id
+
+        if !leaf(node) and checkDepth and !@_aborted
+          opts.block = false
+          kids = for own attr, val of node when !opts.ignore(attr)
+            if Array.isArray val
+              Promise.all (for c,i in val
+                @_walk cloneOpts opts, node, c, "#{attr}[#{i}]", res)
+            else
+              @_walk cloneOpts opts, node, val, attr, res
+
+        r = -> resolve opts.parentRes or res
+        if kids
+          Promise.all(kids).then r
         else
-          @_walk cloneOpts opts, node, val, attr, res
-
-    opts.parentRes or res
+          r()
 
 module.exports = Walk
 
